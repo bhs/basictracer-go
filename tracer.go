@@ -4,6 +4,7 @@ import (
 	"time"
 
 	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Tracer extends the opentracing.Tracer interface with methods to
@@ -104,7 +105,7 @@ func DefaultOptions() Options {
 
 // NewWithOptions creates a customized Tracer.
 func NewWithOptions(opts Options) opentracing.Tracer {
-	rval := &tracerImpl{options: opts}
+	rval := &tracerImpl{options: opts, metrics: make(map[string]operationMetrics)}
 	rval.textPropagator = &textMapPropagator{rval}
 	rval.binaryPropagator = &binaryPropagator{rval}
 	rval.accessorPropagator = &accessorPropagator{rval}
@@ -121,12 +122,22 @@ func New(recorder SpanRecorder) opentracing.Tracer {
 	return NewWithOptions(opts)
 }
 
+type operationMetrics struct {
+	Labels     []string
+	TotalCount *prometheus.CounterVec
+	ErrorCount *prometheus.CounterVec
+	Latencies  *prometheus.HistogramVec
+}
+
 // Implements the `Tracer` interface.
 type tracerImpl struct {
 	options            Options
 	textPropagator     *textMapPropagator
 	binaryPropagator   *binaryPropagator
 	accessorPropagator *accessorPropagator
+
+	// keys are operation names
+	metrics map[string]operationMetrics
 }
 
 func (t *tracerImpl) StartSpan(

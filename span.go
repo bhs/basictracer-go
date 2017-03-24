@@ -7,6 +7,7 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/log"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Span provides access to the essential details of the span, for use
@@ -223,6 +224,38 @@ func (s *spanImpl) FinishWithOptions(opts opentracing.FinishOptions) {
 
 	s.onFinish(s.raw)
 	s.tracer.options.Recorder.RecordSpan(s.raw)
+
+	var metrics operationMetrics
+	var found bool
+	if metrics, found = s.tracer.metrics[s.raw.Operation]; !found {
+		metrics = operationMetrics{
+			Labels: []string{"BLAH"}, // XXX
+			TotalCount: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: s.raw.Operation,
+				Help: "Derived from OpenTracing",
+			}, []string{"BLAH"}),
+			ErrorCount: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: s.raw.Operation + "_errors",
+				Help: "Derived from OpenTracing",
+			}, []string{"BLAH"}),
+			// XXX: Latencies
+		}
+		prometheus.MustRegister(metrics.TotalCount)
+		prometheus.MustRegister(metrics.ErrorCount)
+		s.tracer.metrics[s.raw.Operation] = metrics
+	}
+	total, err := metrics.TotalCount.GetMetricWithLabelValues("HACK")
+	if err != nil {
+		panic(err)
+	}
+	total.Inc()
+	if _, found := s.raw.Tags["error"]; found { // XXX wrongness abounds
+		errors, err := metrics.ErrorCount.GetMetricWithLabelValues("HACK")
+		if err != nil {
+			panic(err)
+		}
+		errors.Inc()
+	}
 
 	// Last chance to get options before the span is possibly reset.
 	poolEnabled := s.tracer.options.EnableSpanPool
